@@ -14,6 +14,10 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     is_suspended = Column(Boolean, default=False) # Admin Ban
+    
+    # Coordinator Application
+    coordinator_application_status = Column(String, default="NONE") # NONE, PENDING, APPROVED, REJECTED
+    
     state_assigned = Column(String, nullable=True) # For coordinators
     civic_points = Column(Integer, default=0)
 

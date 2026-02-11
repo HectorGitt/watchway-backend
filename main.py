@@ -198,6 +198,29 @@ async def update_user_password(
     db.commit()
     return {"message": "Password updated successfully"}
 
+    current_user.hashed_password = auth.get_password_hash(password_update.new_password)
+    db.commit()
+    return {"message": "Password updated successfully"}
+
+@app.post("/users/apply-coordinator", response_model=schemas.User)
+def apply_coordinator(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if current_user.role != "citizen":
+        raise HTTPException(status_code=400, detail="Only citizens can apply")
+        
+    if current_user.coordinator_application_status == "PENDING":
+        raise HTTPException(status_code=400, detail="Application already pending")
+    
+    if current_user.coordinator_application_status == "APPROVED":
+         raise HTTPException(status_code=400, detail="You are already a coordinator")
+
+    current_user.coordinator_application_status = "PENDING"
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
 @app.post("/reports/", response_model=schemas.Report)
 def create_report(
     report: schemas.ReportCreate, 

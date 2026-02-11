@@ -24,6 +24,7 @@ class User(UserBase):
     is_active: bool
     is_verified: bool
     is_suspended: bool = False
+    coordinator_application_status: str
     role: str
     state_assigned: Optional[str] = None
     civic_points: int
@@ -57,3 +58,5 @@ class Report(ReportBase):
 
     class Config:
         orm_mode = True
+
+User.update_forward_refs()
