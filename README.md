@@ -30,6 +30,7 @@ The official backend API for **WatchWay Nigeria**, a platform for tracking infra
 4.  **Environment Setup:**
     Create a `.env` file in the root directory with the following variables:
     ```env
+    DATABASE_URL=postgresql://user:password@localhost:5432/watchway
     SECRET_KEY=your_secret_key_here
     MAIL_USERNAME=your_email@gmail.com
     MAIL_PASSWORD=your_app_password
@@ -42,7 +43,7 @@ The official backend API for **WatchWay Nigeria**, a platform for tracking infra
     ```bash
     python seed_db.py
     ```
-    This script creates the `watchway.db` SQLite database and populates it with:
+    This script connects to the PostgreSQL database defined in `.env`, creates tables, and populates it with:
     -   **Admin User**: `admin@watchway.ng` / `adminsecret`
     -   **Coordinator**: `musa@works.ng` / `secret`
     -   **Citizen**: `demo@watchway.ng` / `secret`
@@ -66,7 +67,7 @@ Access the interactive API docs (Swagger UI) at:
 ## 🛠️ Tech Stack
 
 -   **Framework**: FastAPI
--   **Database**: SQLite (via SQLAlchemy ORM)
+-   **Database**: PostgreSQL (via SQLAlchemy ORM)
 -   **Authentication**: OAuth2 with JWT (JSON Web Tokens)
 -   **Email**: FastAPI-Mail (SMTP)
 

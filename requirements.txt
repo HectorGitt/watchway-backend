@@ -8,3 +8,4 @@ python-multipart
 python-dotenv
 fastapi-mail
 email-validator
+psycopg2-binary
