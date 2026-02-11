@@ -181,6 +181,23 @@ async def update_user_me(
     db.refresh(current_user)
     return current_user
 
+class UserPasswordUpdate(BaseModel):
+    old_password: str
+    new_password: str
+
+@app.put("/users/me/password")
+async def update_user_password(
+    password_update: UserPasswordUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if not auth.verify_password(password_update.old_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Incorrect old password")
+    
+    current_user.hashed_password = auth.get_password_hash(password_update.new_password)
+    db.commit()
+    return {"message": "Password updated successfully"}
+
 @app.post("/reports/", response_model=schemas.Report)
 def create_report(
     report: schemas.ReportCreate, 
