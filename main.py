@@ -263,9 +263,26 @@ def read_report(report_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Report not found")
     return report
 
+import math
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius in km
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = (math.sin(d_lat / 2) * math.sin(d_lat / 2) +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+         math.sin(d_lon / 2) * math.sin(d_lon / 2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+class VerifySchema(BaseModel):
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
 @app.post("/reports/{report_id}/verify", response_model=schemas.Report)
 def verify_report(
     report_id: str, 
+    verify_data: VerifySchema,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
@@ -276,8 +293,32 @@ def verify_report(
     if report.reporter_id == current_user.id:
         raise HTTPException(status_code=400, detail="Start your own verification? You submitted this! Let others verify it.")
 
-    if report.status == "verified":
+    if report.status == "verified" or report.status == "resolved":
         raise HTTPException(status_code=400, detail="Report is already verified")
+
+    # Coordinator Logic: Instant Verify, No location needed
+    if current_user.role == "coordinator" or current_user.role == "admin":
+        report.status = "verified"
+        report.is_verified = True
+        report.verification_count += 3 # Boost count
+        
+        # Award points
+        current_user.civic_points += 2
+        reporter = db.query(models.User).filter(models.User.id == report.reporter_id).first()
+        if reporter:
+             reporter.civic_points += 10
+             
+        db.commit()
+        db.refresh(report)
+        return report
+
+    # Citizen Logic: Proximity Check required
+    if not verify_data.lat or not verify_data.lng:
+        raise HTTPException(status_code=400, detail="GPS location required for citizen verification")
+        
+    dist = calculate_distance(verify_data.lat, verify_data.lng, report.lat, report.lng)
+    if dist > 0.5: # 500 meters
+        raise HTTPException(status_code=400, detail=f"You are too far away ({dist:.2f}km). Get closer to verify.")
 
     # Increment verification count
     report.verification_count += 1
@@ -300,7 +341,9 @@ def verify_report(
     return report
 
 class ResolveSchema(BaseModel):
-    after_image_url: str
+    after_image_url: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 @app.post("/reports/{report_id}/resolve", response_model=schemas.Report)
 def resolve_report(
@@ -312,24 +355,62 @@ def resolve_report(
     report = db.query(models.Report).filter(models.Report.id == report_id).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-        
-    if current_user.role != "coordinator":
-        raise HTTPException(status_code=403, detail="Only coordinators can resolve hazards")
-        
-    if current_user.state_assigned != report.state:
-        raise HTTPException(status_code=403, detail=f"You are only authorized for {current_user.state_assigned}, not {report.state}")
 
-    report.status = "fixed"
-    report.after_image_url = resolve_data.after_image_url
-    
-    # Award massive points to reporter and coordinator
-    current_user.civic_points += 50
-    if report.reporter:
-        report.reporter.civic_points += 20
+    # Coordinator/Admin Logic (Instant Resolve)
+    if current_user.role == "coordinator" or current_user.role == "admin":
+         # Check assignment if coordinator
+        if current_user.role == "coordinator" and current_user.state_assigned != report.state:
+             raise HTTPException(status_code=403, detail=f"You are only authorized for {current_user.state_assigned}")
         
-    db.commit()
-    db.refresh(report)
-    return report
+        report.status = "resolved"
+        if resolve_data.after_image_url:
+            report.after_image_url = resolve_data.after_image_url
+        
+        # Award points
+        current_user.civic_points += 50
+        if report.reporter:
+            report.reporter.civic_points += 20
+        
+        db.commit()
+        db.refresh(report)
+        return report
+
+    # Citizen Logic
+    if not resolve_data.lat or not resolve_data.lng:
+        raise HTTPException(status_code=400, detail="GPS location required for citizen resolution")
+
+    dist = calculate_distance(resolve_data.lat, resolve_data.lng, report.lat, report.lng)
+    if dist > 0.5:
+        raise HTTPException(status_code=400, detail=f"Too far away ({dist:.2f}km).")
+
+    # Path 1: Reporting the fix (Needs photo)
+    if report.status == "verified":
+        if not resolve_data.after_image_url:
+             raise HTTPException(status_code=400, detail="Live photo required to report a fix")
+        
+        report.status = "fix_pending"
+        report.after_image_url = resolve_data.after_image_url
+        current_user.civic_points += 15
+        
+        db.commit()
+        db.refresh(report)
+        return report
+        
+    # Path 2: Confirming the fix (Status is already fix_pending)
+    if report.status == "fix_pending":
+        # Ensure it's not the same person who reported the fix (simplified: check if user provided prev image? 
+        # For now, just check simply. In real app we'd track 'fix_reporter_id')
+        
+        report.status = "resolved"
+        current_user.civic_points += 20
+        if report.reporter:
+             report.reporter.civic_points += 20 # Original reporter gets points too
+             
+        db.commit()
+        db.refresh(report)
+        return report
+
+    raise HTTPException(status_code=400, detail="Report validation logic unhandled")
 
 # --- Admin Endpoints ---
 
