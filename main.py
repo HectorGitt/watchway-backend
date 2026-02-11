@@ -162,6 +162,7 @@ async def resend_verification(
 
 @app.get("/users/me/", response_model=schemas.User)
 async def read_users_me(current_user: schemas.User = Depends(auth.get_current_user)):
+    print(f"DEBUG: read_users_me called for {current_user.email}")
     return current_user
 
 @app.put("/users/me/", response_model=schemas.User)
@@ -577,3 +578,26 @@ def suspend_user(
     db.commit()
     db.refresh(user)
     return user
+
+@app.get("/admin/stats")
+def get_admin_stats(
+    db: Session = Depends(get_db), 
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    
+    total_users = db.query(models.User).count()
+    total_reports = db.query(models.Report).count()
+    active_hazards = db.query(models.Report).filter(models.Report.status != "resolved").count()
+    pending_coordinators = db.query(models.User).filter(models.User.coordinator_application_status == "PENDING").count()
+    
+    recent_reports = db.query(models.Report).order_by(models.Report.created_at.desc()).limit(5).all()
+    
+    return {
+        "total_users": total_users,
+        "total_reports": total_reports,
+        "active_hazards": active_hazards,
+        "pending_coordinators": pending_coordinators,
+        "recent_reports": recent_reports
+    }
