@@ -46,3 +46,10 @@ class Report(Base):
     reporter_id = Column(Integer, ForeignKey("users.id"))
 
     reporter = relationship("User", back_populates="reports")
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String) # Stored as string, cast as needed
+    description = Column(String, nullable=True)

@@ -302,6 +302,9 @@ def verify_report(
         report.is_verified = True
         report.verification_count += 3 # Boost count
         
+        # Trigger X Alert
+        trigger_x_alert(report)
+        
         # Award points
         current_user.civic_points += 2
         reporter = db.query(models.User).filter(models.User.id == report.reporter_id).first()
@@ -317,8 +320,11 @@ def verify_report(
         raise HTTPException(status_code=400, detail="GPS location required for citizen verification")
         
     dist = calculate_distance(verify_data.lat, verify_data.lng, report.lat, report.lng)
-    if dist > 0.5: # 500 meters
-        raise HTTPException(status_code=400, detail=f"You are too far away ({dist:.2f}km). Get closer to verify.")
+    
+    max_radius = get_proximity_radius(db)
+    
+    if dist > max_radius:
+        raise HTTPException(status_code=400, detail=f"You are too far away ({dist:.2f}km). Max allowed: {max_radius}km")
 
     # Increment verification count
     report.verification_count += 1
@@ -327,6 +333,9 @@ def verify_report(
     if report.verification_count >= 3:
         report.status = "verified"
         report.is_verified = True
+        
+        # Trigger X Alert
+        trigger_x_alert(report)
         
         # Award points to reporter for confirmed hazard
         reporter = db.query(models.User).filter(models.User.id == report.reporter_id).first()
@@ -380,8 +389,11 @@ def resolve_report(
         raise HTTPException(status_code=400, detail="GPS location required for citizen resolution")
 
     dist = calculate_distance(resolve_data.lat, resolve_data.lng, report.lat, report.lng)
-    if dist > 0.5:
-        raise HTTPException(status_code=400, detail=f"Too far away ({dist:.2f}km).")
+    
+    max_radius = get_proximity_radius(db)
+    
+    if dist > max_radius:
+        raise HTTPException(status_code=400, detail=f"Too far away ({dist:.2f}km). Max allowed: {max_radius}km")
 
     # Path 1: Reporting the fix (Needs photo)
     if report.status == "verified":
@@ -405,12 +417,75 @@ def resolve_report(
         current_user.civic_points += 20
         if report.reporter:
              report.reporter.civic_points += 20 # Original reporter gets points too
-             
         db.commit()
         db.refresh(report)
         return report
 
     raise HTTPException(status_code=400, detail="Report validation logic unhandled")
+
+# --- System Settings & Admin ---
+
+class SystemSettingSchema(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+
+@app.get("/admin/settings", response_model=List[SystemSettingSchema])
+def get_system_settings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    settings = db.query(models.SystemSetting).all()
+    # Ensure default exists if not found
+    if not any(s.key == "proximity_radius_km" for s in settings):
+        default_prox = models.SystemSetting(key="proximity_radius_km", value="0.5", description="Max radius (km) for verification")
+        db.add(default_prox)
+        db.commit()
+        settings.append(default_prox)
+        
+    return settings
+
+@app.post("/admin/settings", response_model=SystemSettingSchema)
+def update_system_setting(
+    setting: SystemSettingSchema,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    db_setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == setting.key).first()
+    if not db_setting:
+        db_setting = models.SystemSetting(key=setting.key, value=setting.value, description=setting.description)
+        db.add(db_setting)
+    else:
+        db_setting.value = setting.value
+        if setting.description:
+            db_setting.description = setting.description
+            
+    db.commit()
+    db.refresh(db_setting)
+    return db_setting
+
+def get_proximity_radius(db: Session) -> float:
+    setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == "proximity_radius_km").first()
+    if setting:
+        try:
+            return float(setting.value)
+        except:
+            return 0.5
+    return 0.5
+
+# --- Integrations ---
+
+def trigger_x_alert(report: models.Report):
+    # Placeholder for X API integration
+    # In a real app, this would use tweepy or similar to post a tweet
+    print(f"TRIGGER_X_ALERT: Hazardous Condition Verified! {report.title} at {report.address}. #WatchWay")
+    pass
 
 # --- Admin Endpoints ---
 
@@ -419,15 +494,22 @@ def read_users(
     skip: int = 0, 
     limit: int = 100, 
     role: Optional[str] = None,
+    sort_by: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
     if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+        raise HTTPException(status_code=403, detail="Admin access required")
     
     query = db.query(models.User)
-    if role:
+    
+    if role and role != "all":
         query = query.filter(models.User.role == role)
+        
+    if sort_by == "civic_points":
+        query = query.order_by(models.User.civic_points.desc())
+    else:
+        query = query.order_by(models.User.id.asc())
         
     return query.offset(skip).limit(limit).all()
 
