@@ -201,10 +201,6 @@ async def update_user_password(
     db.commit()
     return {"message": "Password updated successfully"}
 
-    current_user.hashed_password = auth.get_password_hash(password_update.new_password)
-    db.commit()
-    return {"message": "Password updated successfully"}
-
 @app.post("/users/apply-coordinator", response_model=schemas.User)
 def apply_coordinator(
     db: Session = Depends(get_db),
