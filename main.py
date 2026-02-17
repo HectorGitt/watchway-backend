@@ -227,6 +227,7 @@ def apply_coordinator(
 @app.post("/reports/", response_model=schemas.Report)
 def create_report(
     report: schemas.ReportCreate, 
+    x_device_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
@@ -244,7 +245,8 @@ def create_report(
         status="unverified",
         reporter_id=current_user.id,
         severity_level=report.severity_level or 1, # Default to 1 if not provided
-        is_verified=False
+        is_verified=False,
+        device_id=x_device_id
     )
     db.add(db_report)
     
@@ -309,6 +311,7 @@ class VerifySchema(BaseModel):
 def verify_report(
     report_id: str, 
     verify_data: VerifySchema,
+    x_device_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
@@ -316,12 +319,31 @@ def verify_report(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
         
+    # 1. Self-Verification Block
     if report.reporter_id == current_user.id:
-        raise HTTPException(status_code=400, detail="Start your own verification? You submitted this! Let others verify it.")
+        raise HTTPException(status_code=400, detail="You cannot verify your own report. A different Citizen must confirm this from their location")
+
+    # 2. Sybil Checker (Device ID Binding)
+    # If the device that submitted the report tries to verify it (even with diff account) -> BLOCK
+    if x_device_id and report.device_id and x_device_id == report.device_id:
+        raise HTTPException(status_code=400, detail="Security Alert: You cannot verify a report from the same device used to submit it.")
+
+    # 3. Double-Voting Checker
+    # Check if this User OR this Device has already verified this report
+    query = db.query(models.ReportVerification).filter(models.ReportVerification.report_id == report.id)
+    if x_device_id:
+        query = query.filter((models.ReportVerification.user_id == current_user.id) | (models.ReportVerification.device_id == x_device_id))
+    else:
+        query = query.filter(models.ReportVerification.user_id == current_user.id)
+        
+    existing_vote = query.first()
+    if existing_vote:
+        raise HTTPException(status_code=400, detail="You have already verified this report.")
 
     if report.status == "verified" or report.status == "resolved":
         raise HTTPException(status_code=400, detail="Report is already verified")
 
+    # Record the verification logic attempt
     # Coordinator Logic: Instant Verify, No location needed
     if current_user.role == "coordinator" or current_user.role == "admin":
         report.status = "verified"
@@ -337,6 +359,10 @@ def verify_report(
         reporter = db.query(models.User).filter(models.User.id == report.reporter_id).first()
         if reporter:
              reporter.civic_points += 10
+             
+        # Log Verification
+        new_verify = models.ReportVerification(report_id=report.id, user_id=current_user.id, device_id=x_device_id)
+        db.add(new_verify)
              
         db.commit()
         db.refresh(report)
@@ -355,6 +381,10 @@ def verify_report(
 
     # Increment verification count
     report.verification_count += 1
+    
+    # Log Verification
+    new_verify = models.ReportVerification(report_id=report.id, user_id=current_user.id, device_id=x_device_id)
+    db.add(new_verify)
     
     # Dynamic Severity Increase
     # Mechanism: For every 5 verifications, increase severity by 1, up to max 5

@@ -51,8 +51,22 @@ class Report(Base):
 
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     reporter_id = Column(Integer, ForeignKey("users.id"))
+    device_id = Column(String, nullable=True) # For Sybil Defense
 
     reporter = relationship("User", back_populates="reports")
+    verifications = relationship("ReportVerification", back_populates="report")
+
+class ReportVerification(Base):
+    __tablename__ = "report_verifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    report_id = Column(String, ForeignKey("reports.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    device_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    report = relationship("Report", back_populates="verifications")
+    user = relationship("User")
 
 class SystemSetting(Base):
     __tablename__ = "system_settings"
