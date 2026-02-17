@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 import models, schemas, auth, database
 from database import engine
@@ -163,6 +164,7 @@ async def resend_verification(
 @app.get("/users/me/", response_model=schemas.User)
 async def read_users_me(current_user: schemas.User = Depends(auth.get_current_user)):
     print(f"DEBUG: read_users_me called for {current_user.email}")
+    print(f"DEBUG: Returning user role: {current_user.role}")
     return current_user
 
 @app.put("/users/me/", response_model=schemas.User)
@@ -241,7 +243,7 @@ def create_report(
         jurisdiction=jurisdiction, 
         status="unverified",
         reporter_id=current_user.id,
-        severity_level=5,
+        severity_level=report.severity_level or 1, # Default to 1 if not provided
         is_verified=False
     )
     db.add(db_report)
@@ -326,8 +328,9 @@ def verify_report(
         report.is_verified = True
         report.verification_count += 3 # Boost count
         
-        # Trigger X Alert
-        trigger_x_alert(report)
+        # Trigger X Alert if auto-post enabled
+        if get_auto_post_x(db):
+            trigger_x_alert(report)
         
         # Award points
         current_user.civic_points += 2
@@ -353,6 +356,12 @@ def verify_report(
     # Increment verification count
     report.verification_count += 1
     
+    # Dynamic Severity Increase
+    # Mechanism: For every 5 verifications, increase severity by 1, up to max 5
+    # This crowdsources urgency
+    if report.verification_count % 5 == 0 and report.severity_level < 5:
+        report.severity_level += 1
+        
     # Auto-verify threshold logic
     if report.verification_count >= 3:
         report.status = "verified"
@@ -441,6 +450,11 @@ def resolve_report(
         current_user.civic_points += 20
         if report.reporter:
              report.reporter.civic_points += 20 # Original reporter gets points too
+        
+        # Trigger X Alert if auto-post enabled
+        if get_auto_post_x(db):
+            trigger_x_alert(report)
+
         db.commit()
         db.refresh(report)
         return report
@@ -469,6 +483,12 @@ def get_system_settings(
         db.add(default_prox)
         db.commit()
         settings.append(default_prox)
+        
+    if not any(s.key == "auto_post_x" for s in settings):
+        default_auto = models.SystemSetting(key="auto_post_x", value="false", description="Auto-post verified reports to X")
+        db.add(default_auto)
+        db.commit()
+        settings.append(default_auto)
         
     return settings
 
@@ -503,13 +523,137 @@ def get_proximity_radius(db: Session) -> float:
             return 0.5
     return 0.5
 
+def get_auto_post_x(db: Session) -> bool:
+    setting = db.query(models.SystemSetting).filter(models.SystemSetting.key == "auto_post_x").first()
+    if setting:
+        return setting.value.lower() == "true"
+    return False
+
 # --- Integrations ---
+import tweepy
+
+def get_twitter_client():
+    api_key = os.getenv("TWITTER_API_KEY")
+    api_secret = os.getenv("TWITTER_API_SECRET")
+    access_token = os.getenv("TWITTER_ACCESS_TOKEN")
+    access_secret = os.getenv("TWITTER_ACCESS_SECRET")
+    
+    if not all([api_key, api_secret, access_token, access_secret]):
+        print("TWITTER: Missing credentials")
+        return None
+
+    try:
+        client = tweepy.Client(
+            consumer_key=api_key,
+            consumer_secret=api_secret,
+            access_token=access_token,
+            access_token_secret=access_secret
+        )
+        return client
+    except Exception as e:
+        print(f"TWITTER: Client init failed - {e}")
+        return None
+
+def format_tweet(report: models.Report) -> str:
+    status_emoji = "🚧"
+    if report.status == "resolved": status_emoji = "✅"
+    elif report.status == "verified": status_emoji = "⚠️"
+    
+    tweet = f"{status_emoji} Road Hazard Alert!\n\n"
+    tweet += f"📍 {report.address[:40]}...\n"
+    tweet += f"🏙️ {report.state} ({report.jurisdiction})\n"
+    tweet += f"⚠️ Severity: {report.severity_level}/5\n"
+    tweet += f"ℹ️ {report.title}\n"
+    tweet += f"🔗 View Report: https://watchway.ng/report/{report.id}\n\n"
+    tweet += f"#WatchWay #{report.state.replace(' ', '')} #RoadSafety"
+    return tweet
 
 def trigger_x_alert(report: models.Report):
-    # Placeholder for X API integration
-    # In a real app, this would use tweepy or similar to post a tweet
-    print(f"TRIGGER_X_ALERT: Hazardous Condition Verified! {report.title} at {report.address}. #WatchWay")
-    pass
+    client = get_twitter_client()
+    if not client:
+        # Fallback to mock if no creds
+        post_id = f"mock_x_{secrets.token_hex(4)}"
+        print(f"TRIGGER_X_ALERT (Mock): {format_tweet(report)}")
+        report.x_post_id = post_id
+        return
+
+    try:
+        tweet_text = format_tweet(report)
+        response = client.create_tweet(text=tweet_text)
+        post_id = response.data['id']
+        print(f"TRIGGER_X_ALERT: Posted {post_id}")
+        report.x_post_id = post_id
+    except Exception as e:
+        print(f"TRIGGER_X_ALERT: Failed to post - {e}")
+
+@app.post("/reports/{report_id}/x-post")
+def manual_trigger_x_post(
+    report_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    report = db.query(models.Report).filter(models.Report.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+        
+    client = get_twitter_client()
+    if not client:
+        # Mock Post
+        report.x_post_id = f"mock_x_{secrets.token_hex(4)}"
+        print(f"MANUAL_X_POST (Mock): {format_tweet(report)}")
+        db.commit()
+        return {"message": "Posted to X (Mock)", "x_post_id": report.x_post_id}
+
+    try:
+        tweet_text = format_tweet(report)
+        response = client.create_tweet(text=tweet_text)
+        post_id = response.data['id']
+        report.x_post_id = post_id
+        db.commit()
+        return {"message": "Posted to X", "x_post_id": post_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to post to X: {str(e)}")
+
+@app.get("/admin/analytics", dependencies=[Depends(get_db)])
+def get_analytics(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    # 1. Status Distribution
+    status_counts = db.query(models.Report.status, func.count(models.Report.id)).group_by(models.Report.status).all()
+    status_data = [{"name": s[0], "value": s[1]} for s in status_counts]
+    
+    # 2. Jurisdiction Distribution
+    jur_counts = db.query(models.Report.jurisdiction, func.count(models.Report.id)).group_by(models.Report.jurisdiction).all()
+    jur_data = [{"name": j[0], "value": j[1]} for j in jur_counts]
+    
+    # 3. Growth (Mocked for now as SQLite date truncate is tricky/verbose, in Prod use Postgres date_trunc)
+    # In a real app we'd do a daily query. For now, let's return some mock trend data based on actual counts
+    # total_users = db.query(models.User).count()
+    # total_reports = db.query(models.Report).count()
+    
+    # Mock last 7 days
+    growth_data = [
+        {"date": "Day 1", "users": 10, "reports": 5},
+        {"date": "Day 2", "users": 15, "reports": 8},
+        {"date": "Day 3", "users": 22, "reports": 15},
+        {"date": "Day 4", "users": 30, "reports": 25},
+        {"date": "Day 5", "users": 35, "reports": 40},
+        {"date": "Day 6", "users": 42, "reports": 55},
+        {"date": "Today", "users": db.query(models.User).count(), "reports": db.query(models.Report).count()},
+    ]
+    
+    return {
+        "status": status_data,
+        "distribution": jur_data,
+        "growth": growth_data
+    }
 
 # --- Admin Endpoints ---
 

@@ -46,6 +46,9 @@ class Report(Base):
     verification_count = Column(Integer, default=0)
     is_verified = Column(Boolean, default=False)
     
+    # Social Media
+    x_post_id = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     reporter_id = Column(Integer, ForeignKey("users.id"))
 

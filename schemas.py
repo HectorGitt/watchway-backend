@@ -31,7 +31,7 @@ class User(UserBase):
     reports: List["Report"] = []
 
     class Config:
-        orm_mode = True # In v2 this is from_attributes = True
+        from_attributes = True
 
 class ReportBase(BaseModel):
     title: str
@@ -44,7 +44,7 @@ class ReportBase(BaseModel):
     after_image_url: Optional[str] = None
 
 class ReportCreate(ReportBase):
-    pass
+    severity_level: Optional[int] = 5
 
 class Report(ReportBase):
     id: str
@@ -55,8 +55,9 @@ class Report(ReportBase):
     
     created_at: datetime
     reporter_id: int
+    x_post_id: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 User.update_forward_refs()

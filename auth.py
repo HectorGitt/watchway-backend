@@ -52,5 +52,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     
     user = db.query(models.User).filter(models.User.email == email).first()
     if user is None:
+        print("DEBUG: get_current_user - User not found in DB")
         raise credentials_exception
+        
+    print(f"DEBUG: get_current_user success for {email}")
     return user
