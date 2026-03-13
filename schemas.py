@@ -18,7 +18,11 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str
+    password: Optional[str] = None
+
+
+class GoogleLogin(BaseModel):
+    token: str
 
 
 class UserUpdate(BaseModel):
