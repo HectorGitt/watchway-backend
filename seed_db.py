@@ -3,10 +3,14 @@ from database import SessionLocal, engine
 import models
 import secrets
 from datetime import datetime
-import auth # Import auth to access hashing function
+import auth  # Import auth to access hashing function
 
-# Ensure tables exist
+# Ensure tables exist (Reset DB)
+print("Dropping all tables...")
+models.Base.metadata.drop_all(bind=engine)
+print("Creating tables...")
 models.Base.metadata.create_all(bind=engine)
+
 
 def seed_data():
     db = SessionLocal()
@@ -22,8 +26,8 @@ def seed_data():
         user = models.User(
             username="Demola",
             email="demo@watchway.ng",
-            hashed_password=auth.get_password_hash("secret"), # Properly hashed
-            is_verified=True
+            hashed_password=auth.get_password_hash("secret"),  # Properly hashed
+            is_verified=True,
         )
         db.add(user)
         db.commit()
@@ -37,24 +41,26 @@ def seed_data():
         coord = models.User(
             username="Engr. Musa",
             email="musa@works.ng",
-            hashed_password=auth.get_password_hash("secret"), # Properly hashed
+            hashed_password=auth.get_password_hash("secret"),  # Properly hashed
             role="coordinator",
             state_assigned="Lagos",
-            is_verified=True
+            is_verified=True,
         )
         db.add(coord)
         db.commit()
         print("Created Coordinator: Engr. Musa (Lagos)")
 
     # Create Admin
-    admin = db.query(models.User).filter(models.User.email == "admin@watchway.ng").first()
+    admin = (
+        db.query(models.User).filter(models.User.email == "admin@watchway.ng").first()
+    )
     if not admin:
         admin = models.User(
             username="Admin User",
             email="admin@watchway.ng",
             hashed_password=auth.get_password_hash("adminsecret"),
             role="admin",
-            is_verified=True
+            is_verified=True,
         )
         db.add(admin)
         db.commit()
@@ -68,13 +74,14 @@ def seed_data():
             lat=6.5432,
             lng=3.3765,
             address="Ikorodu Rd, Fadeyi, Lagos",
+            location_description="Near the Fadeyi Bus Stop pedestrian bridge",
             state="Lagos",
             jurisdiction="FEDERAL",
             status="verified",
-            severity_level=9,
+            severity_level=5,
             live_image_url="https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&q=80&w=2000",
             reporter_id=user.id,
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         ),
         models.Report(
             id=secrets.token_hex(4),
@@ -86,10 +93,10 @@ def seed_data():
             state="Abuja",
             jurisdiction="STATE",
             status="unverified",
-            severity_level=6,
+            severity_level=3,
             live_image_url="https://plus.unsplash.com/premium_photo-1664303847960-586318f59035?q=80&w=1974&auto=format&fit=crop",
             reporter_id=user.id,
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         ),
         models.Report(
             id=secrets.token_hex(4),
@@ -101,11 +108,11 @@ def seed_data():
             state="Lagos",
             jurisdiction="STATE",
             status="fixed",
-            severity_level=8,
+            severity_level=4,
             live_image_url="https://images.unsplash.com/photo-1585579331818-f257a44c9b36?auto=format&fit=crop&q=80&w=2000",
             reporter_id=user.id,
-            created_at=datetime.utcnow()
-        )
+            created_at=datetime.utcnow(),
+        ),
     ]
 
     for report in reports:
@@ -115,6 +122,7 @@ def seed_data():
     db.commit()
     print("Seeding Complete!")
     db.close()
+
 
 if __name__ == "__main__":
     seed_data()

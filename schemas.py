@@ -2,22 +2,28 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 class TokenData(BaseModel):
     username: Optional[str] = None
+
 
 class UserBase(BaseModel):
     email: str
     username: Optional[str] = None
 
+
 class UserCreate(UserBase):
     password: str
 
+
 class UserUpdate(BaseModel):
     username: Optional[str] = None
+
 
 class User(UserBase):
     id: int
@@ -33,18 +39,22 @@ class User(UserBase):
     class Config:
         from_attributes = True
 
+
 class ReportBase(BaseModel):
     title: str
     description: str
     lat: float
     lng: float
     address: str
+    location_description: Optional[str] = None
     state: str
     live_image_url: str
     after_image_url: Optional[str] = None
 
+
 class ReportCreate(ReportBase):
     severity_level: Optional[int] = 5
+
 
 class Report(ReportBase):
     id: str
@@ -52,12 +62,13 @@ class Report(ReportBase):
     status: str
     severity_level: int
     verification_count: int
-    
+
     created_at: datetime
     reporter_id: int
     x_post_id: Optional[str] = None
 
     class Config:
         from_attributes = True
+
 
 User.update_forward_refs()
