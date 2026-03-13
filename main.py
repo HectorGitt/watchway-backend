@@ -34,7 +34,12 @@ conf = ConnectionConfig(
 )
 
 # CORS
-origins = ["*"]  # Allow all for dev debugging
+# Comma-separated list of allowed origins
+FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
+origins = (
+    [url.strip() for url in FRONTEND_URL.split(",")] if FRONTEND_URL != "*" else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -315,9 +320,13 @@ def create_report(
     else:
         jurisdiction = "STATE"
 
+    report_data = report.model_dump()
+    if "severity_level" in report_data:
+        del report_data["severity_level"]
+
     db_report = models.Report(
         id=secrets.token_hex(4),  # Generates 8-char random ID
-        **report.dict(),
+        **report_data,
         jurisdiction=jurisdiction,
         status="unverified",
         reporter_id=current_user.id,
