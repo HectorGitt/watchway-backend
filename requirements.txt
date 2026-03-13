@@ -8,7 +8,7 @@ python-multipart==0.0.20
 python-dotenv==1.2.1
 fastapi-mail==1.5.0
 email-validator==2.2.0
-psycopg2-binary==2.9.9
+pg8000==1.31.5
 tweepy==4.16.0
 requests==2.31.0
 google-auth==2.40.3
