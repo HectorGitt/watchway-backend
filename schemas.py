@@ -75,4 +75,8 @@ class Report(ReportBase):
         from_attributes = True
 
 
+class WaitlistCreate(BaseModel):
+    email: str
+
+
 User.update_forward_refs()

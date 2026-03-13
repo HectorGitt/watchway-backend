@@ -399,6 +399,24 @@ class VerifySchema(BaseModel):
     lng: Optional[float] = None
 
 
+@app.post("/waitlist/", tags=["Waitlist"])
+def join_waitlist(
+    waitlist_entry: schemas.WaitlistCreate, db: Session = Depends(get_db)
+):
+    existing = (
+        db.query(models.Waitlist)
+        .filter(models.Waitlist.email == waitlist_entry.email)
+        .first()
+    )
+    if existing:
+        return {"message": "Email already on waitlist."}
+
+    db_entry = models.Waitlist(email=waitlist_entry.email)
+    db.add(db_entry)
+    db.commit()
+    return {"message": "Successfully joined waitlist!"}
+
+
 @app.post("/reports/{report_id}/verify", response_model=schemas.Report)
 def verify_report(
     report_id: str,

@@ -83,3 +83,11 @@ class SystemSetting(Base):
     key = Column(String, primary_key=True, index=True)
     value = Column(String)  # Stored as string, cast as needed
     description = Column(String, nullable=True)
+
+
+class Waitlist(Base):
+    __tablename__ = "waitlist"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
