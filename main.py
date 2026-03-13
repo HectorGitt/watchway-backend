@@ -11,8 +11,13 @@ from pydantic import EmailStr, BaseModel
 import os
 from dotenv import load_dotenv
 import secrets
-from google.oauth2 import id_token
+import json
+import base64
+import math
+import tweepy
+from google.oauth2 import service_account, id_token
 from google.auth.transport import requests as google_requests
+from google.cloud import storage
 
 load_dotenv()
 
@@ -324,6 +329,48 @@ def create_report(
     if "severity_level" in report_data:
         del report_data["severity_level"]
 
+    # Handle GCS image upload if valid base64 is provided
+    try:
+        if report_data.get("live_image_url") and report_data[
+            "live_image_url"
+        ].startswith("data:image"):
+            base64_img = report_data["live_image_url"]
+            header, encoded = base64_img.split(",", 1)
+            ext = "jpg"
+            if "png" in header:
+                ext = "png"
+
+            img_data = base64.b64decode(encoded)
+
+            creds_json = os.environ.get("GCP_SA_JSON")
+            if creds_json:
+                creds_dict = json.loads(creds_json)
+                credentials = service_account.Credentials.from_service_account_info(
+                    creds_dict
+                )
+                client = storage.Client(
+                    credentials=credentials, project=credentials.project_id
+                )
+            else:
+                client = storage.Client()
+
+            bucket = client.bucket("watchway")
+
+            # Organize files in a /reports/ folder by date/ID
+            file_name = f"reports/{secrets.token_hex(8)}.{ext}"
+            blob = bucket.blob(file_name)
+
+            # Upload image
+            blob.upload_from_string(img_data, content_type=f"image/{ext}")
+
+            # Set public URL back into report_data
+            report_data["live_image_url"] = (
+                f"https://storage.googleapis.com/watchway/{file_name}"
+            )
+    except Exception as e:
+        print(f"Failed to upload image to GCS: {e}")
+        # Keep base64 or set to none if it fails, but ideally it succeeds
+
     db_report = models.Report(
         id=secrets.token_hex(4),  # Generates 8-char random ID
         **report_data,
@@ -378,9 +425,6 @@ def read_report(report_id: str, db: Session = Depends(get_db)):
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
-
-
-import math
 
 
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -725,7 +769,7 @@ def get_proximity_radius(db: Session) -> float:
     if setting:
         try:
             return float(setting.value)
-        except:
+        except Exception:
             return 0.5
     return 0.5
 
@@ -742,7 +786,6 @@ def get_auto_post_x(db: Session) -> bool:
 
 
 # --- Integrations ---
-import tweepy
 
 
 def get_twitter_client():

@@ -13,3 +13,4 @@ tweepy==4.16.0
 requests==2.31.0
 google-auth==2.40.3
 alembic==1.16.5
+google-cloud-storage==3.9.0
