@@ -1,0 +1,19 @@
+# Ignore compiled python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore env files
+.env
+.venv
+env/
+venv/
+
+# Ignore databases
+*.sqlite
+*.db
+watchway_v2.db
+
+# Ignore logs
+*.log
+server.log
